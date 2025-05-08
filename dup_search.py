@@ -22,7 +22,12 @@ def find_subset_statuses(folder_dict):
         set1 = folder_sets[folder1]
         for folder2 in folders[i+1:]:
             set2 = folder_sets[folder2]
-            
+            """
+            TODO: right now if two folders are equal, folder1 will be marked as a subset and folder2 will not.
+            for now this is good because we want to keep one of each copy,
+            however, later we might want to find some way of prioritizing one over the other,
+            also this flaw make "find_subset_statuses" an inaccurate name because if two folders are equal they are subsets of eachother
+            """
             if set1 <= set2:
                 is_subset[folder1] = True
                 break
