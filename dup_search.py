@@ -13,7 +13,7 @@ def create_folder_to_files_dictionary(database):
     return dictionary
 
 def find_subset_statuses(folder_dict):
-    """find folders that are subsets of others."""
+    """determine if folders are subsets of others."""
     folders = list(folder_dict.keys())
     folder_sets = {f: set(hashes) for f, hashes in folder_dict.items()}
     is_subset = {f: False for f in folders}
@@ -22,12 +22,6 @@ def find_subset_statuses(folder_dict):
         set1 = folder_sets[folder1]
         for folder2 in folders[i+1:]:
             set2 = folder_sets[folder2]
-            """
-            TODO: right now if two folders are equal, folder1 will be marked as a subset and folder2 will not.
-            for now this is good because we want to keep one of each copy,
-            however, later we might want to find some way of prioritizing one over the other,
-            also this flaw make "find_subset_statuses" an inaccurate name because if two folders are equal they are subsets of eachother
-            """
             if set1 <= set2:
                 is_subset[folder1] = True
                 break
@@ -37,11 +31,11 @@ def find_subset_statuses(folder_dict):
     return is_subset
 
 def find_maximal_folders(is_subset):
-    """feturn folder names that are not subsets of any other folder."""
+    """return folder names that are not subsets of any other folder."""
     return [Path(f).name for f, subset in is_subset.items() if not subset]
 
 def print_samples(cursor, is_subset, num_samples):
-    """Print sample hashes with their folder subset statuses."""
+    """print sample hashes with their folder subset statuses."""
     cursor.execute("SELECT DISTINCT sha256 FROM song ORDER BY RANDOM() LIMIT ?", (num_samples,))
     sampled_hashes = cursor.fetchall()
     
@@ -58,10 +52,36 @@ def print_samples(cursor, is_subset, num_samples):
             status = "Max" if not is_subset.get(parent, False) else "Sub"
             print(f"{status:>5} -> {parent}")
 
+def remove_subset_entries(cursor, is_subset):
+    """remove all entries in subset folders from the database."""
+    subset_folders = []
+    for folder, is_sub in is_subset.items():
+        if is_sub:
+            folder_tuple = (folder,)
+            subset_folders.append(folder_tuple)
+
+    if not subset_folders:
+        return 0
+
+    cursor.execute("CREATE TEMP TABLE subset_folders (folder TEXT PRIMARY KEY)")
+    cursor.executemany("INSERT INTO subset_folders VALUES (?)", subset_folders)
+
+    cursor.connection.create_function("get_parent", 1, lambda p: str(Path(p).parent))
+
+    cursor.execute("""
+        DELETE FROM song
+        WHERE get_parent(path) IN (SELECT folder FROM subset_folders)
+    """)
+    deleted_count = cursor.rowcount
+
+    cursor.execute("DROP TABLE subset_folders")
+    return deleted_count
+
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description="Analyze and manage duplicate folders in a beatoraja database.")
     parser.add_argument("db_path", help="Path to song.db")
-    parser.add_argument("--samples", type=int, default=0, help="Number of sample hashes to analyze")
+    parser.add_argument("--samples", type=int, default=0, help="Print out a number of sample hashes to analyze")
+    parser.add_argument("--delete", action="store_true", help="Remove redundant entries from the database")
     args = parser.parse_args()
 
     conn = sqlite3.connect(args.db_path)
@@ -75,6 +95,11 @@ if __name__ == "__main__":
     for folder in sorted(max_folders):
         print(folder)
     print(f"\nTotal maximal folders: {len(max_folders)}")
+
+    if args.delete:
+        deleted_count = remove_subset_entries(cursor, is_subset)
+        conn.commit()
+        print(f"\nDeleted {deleted_count} entries from subset folders.")
 
     if args.samples > 0:
         print_samples(cursor, is_subset, args.samples)
