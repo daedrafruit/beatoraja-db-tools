@@ -72,16 +72,16 @@ def remove_subset_entries(cursor, is_subset):
         DELETE FROM song
         WHERE get_parent(path) IN (SELECT folder FROM subset_folders)
     """)
-    deleted_count = cursor.rowcount
+    removed_count = cursor.rowcount
 
     cursor.execute("DROP TABLE subset_folders")
-    return deleted_count
+    return removed_count
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Analyze and manage duplicate folders in a beatoraja database.")
     parser.add_argument("db_path", help="Path to song.db")
     parser.add_argument("--samples", type=int, default=0, help="Print out a number of sample hashes to analyze")
-    parser.add_argument("--delete", action="store_true", help="Remove redundant entries from the database")
+    parser.add_argument("--remove", action="store_true", help="Remove redundant entries from the database, not from disk")
     args = parser.parse_args()
 
     conn = sqlite3.connect(args.db_path)
@@ -96,10 +96,10 @@ if __name__ == "__main__":
         print(folder)
     print(f"\nTotal maximal folders: {len(max_folders)}")
 
-    if args.delete:
-        deleted_count = remove_subset_entries(cursor, is_subset)
+    if args.remove:
+        removed_count = remove_subset_entries(cursor, is_subset)
         conn.commit()
-        print(f"\nDeleted {deleted_count} entries from subset folders.")
+        print(f"\nRemoved {removed_count} entries from database.")
 
     if args.samples > 0:
         print_samples(cursor, is_subset, args.samples)
