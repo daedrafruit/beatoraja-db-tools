@@ -4,7 +4,7 @@ from collections import defaultdict
 import argparse
 
 def create_folder_to_files_dictionary(database):
-    """map each directory to its file hashes."""
+    """Map each directory to its file hashes."""
     database.execute("SELECT sha256, path FROM song")
     dictionary = defaultdict(list)
     for sha256, path in database.fetchall():
@@ -13,7 +13,7 @@ def create_folder_to_files_dictionary(database):
     return dictionary
 
 def find_subset_statuses(folder_dict):
-    """determine if folders are subsets of others."""
+    """Determine if folders are subsets of others."""
     folders = list(folder_dict.keys())
     folder_sets = {f: set(hashes) for f, hashes in folder_dict.items()}
     is_subset = {f: False for f in folders}
@@ -31,11 +31,11 @@ def find_subset_statuses(folder_dict):
     return is_subset
 
 def find_maximal_folders(is_subset):
-    """return folder names that are not subsets of any other folder."""
+    """Return folder names that are not subsets of any other folder."""
     return [Path(f).name for f, subset in is_subset.items() if not subset]
 
 def print_samples(cursor, is_subset, num_samples):
-    """print sample hashes with their folder subset statuses."""
+    """Print sample hashes with their folder subset statuses."""
     cursor.execute("SELECT DISTINCT sha256 FROM song ORDER BY RANDOM() LIMIT ?", (num_samples,))
     sampled_hashes = cursor.fetchall()
     
@@ -53,7 +53,7 @@ def print_samples(cursor, is_subset, num_samples):
             print(f"{status:>5} -> {parent}")
 
 def remove_subset_entries(cursor, is_subset):
-    """remove all entries in subset folders from the database."""
+    """Remove all entries in subset folders from the database."""
     subset_folders = []
     for folder, is_sub in is_subset.items():
         if is_sub:
@@ -87,10 +87,15 @@ if __name__ == "__main__":
     conn = sqlite3.connect(args.db_path)
     cursor = conn.cursor()
 
-    folder_dict = create_folder_to_files_dictionary(cursor)
-    is_subset = find_subset_statuses(folder_dict)
-    max_folders = find_maximal_folders(is_subset)
+    #folder_dict = create_folder_to_files_dictionary(cursor)
+    #is_subset = find_subset_statuses(folder_dict)
+    #max_folders = find_maximal_folders(is_subset)
 
+    #charts = "C:/Users/dragonfruit/ma-crib/games/bms/charts"
+    charts = "C:/Users/dragonfruit/ma-crib/games/bms/beatoraja/dup_search/test-charts"
+    result = create_tables(cursor, charts)
+    print(result)
+    """
     print("Maximal folders:")
     for folder in sorted(max_folders):
         print(folder)
@@ -103,5 +108,6 @@ if __name__ == "__main__":
 
     if args.samples > 0:
         print_samples(cursor, is_subset, args.samples)
+    """
 
     conn.close()
