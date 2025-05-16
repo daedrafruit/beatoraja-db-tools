@@ -1,0 +1,9 @@
+find /path/to/folder -type f \( -iname "*.wav" -o -iname "*.flac" -o -iname "*.aiff" -o -iname "*.aif" -o -iname "*.m4a" \) -print0 | \
+xargs -0 -P$(nproc) -I{} bash -c '
+    input_file="{}"
+    output_file="${input_file%.*}.ogg"
+    if [ ! -f "$output_file" ]; then
+        echo "Converting: $input_file"
+        ffmpeg -i "$input_file" -c:a libvorbis -q:a 6 -loglevel error "$output_file" && rm "$input_file"
+    fi
+'
