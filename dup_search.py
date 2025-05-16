@@ -1,3 +1,4 @@
+import shutil
 import sqlite3
 from pathlib import Path
 from collections import defaultdict
@@ -77,29 +78,54 @@ def remove_subset_entries(cursor, is_subset):
     cursor.execute("DROP TABLE subset_folders")
     return removed_count
 
-if __name__ == "__main__":
+def move_folders(is_subset, charts_root, dry_run=True):
+    """Move subset folders to backup location (_bac appended to charts root)"""
+    moved = []
+    charts_root = Path(charts_root).resolve()
+    backup_root = charts_root.parent / f"{charts_root.name}_bac"
+    
+    subset_folders = [folder for folder, is_sub in is_subset.items() if is_sub]
+    
+    for folder in subset_folders:
+        src = Path(folder).resolve()
+        try:
+            rel_path = src.relative_to(charts_root)
+            dest = backup_root / rel_path
+            
+            if dry_run:
+                moved.append((src, dest))
+                continue
+                
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(src), str(dest))
+            moved.append((src, dest))
+            
+        except ValueError:
+            print(f"Skipping {src} - not under charts root {charts_root}")
+    
+    return moved
+
+def main():
     parser = argparse.ArgumentParser(description="Analyze and manage duplicate folders in a beatoraja database.")
-    parser.add_argument("db_path", help="Path to song.db")
+    parser.add_argument("--db", required=True, help="Path to song.db")
     parser.add_argument("--samples", type=int, default=0, help="Print out a number of sample hashes to analyze")
     parser.add_argument("--remove", action="store_true", help="Remove redundant entries from the database, not from disk")
+    parser.add_argument("--dry-run", action="store_true", help="Simulate folder moves")
+    parser.add_argument("--charts-root", help="Root directory of your charts (required for moving)")
     args = parser.parse_args()
 
-    conn = sqlite3.connect(args.db_path)
+    conn = sqlite3.connect(args.db)
     cursor = conn.cursor()
 
-    #folder_dict = create_folder_to_files_dictionary(cursor)
-    #is_subset = find_subset_statuses(folder_dict)
-    #max_folders = find_maximal_folders(is_subset)
+    folder_dict = create_folder_to_files_dictionary(cursor)
+    is_subset = find_subset_statuses(folder_dict)
+    max_folders = find_maximal_folders(is_subset)
 
-    #charts = "C:/Users/dragonfruit/ma-crib/games/bms/charts"
-    charts = "C:/Users/dragonfruit/ma-crib/games/bms/beatoraja/dup_search/test-charts"
-    result = create_tables(cursor, charts)
-    print(result)
-    """
     print("Maximal folders:")
     for folder in sorted(max_folders):
         print(folder)
     print(f"\nTotal maximal folders: {len(max_folders)}")
+    print(f"\nTotal subset folders: {len([folder for folder, is_sub in is_subset.items() if is_sub])}")
 
     if args.remove:
         removed_count = remove_subset_entries(cursor, is_subset)
@@ -108,6 +134,27 @@ if __name__ == "__main__":
 
     if args.samples > 0:
         print_samples(cursor, is_subset, args.samples)
-    """
+
+    if args.dry_run or args.charts_root:
+        if not args.charts_root:
+            print("Error: --charts-root required when using --dry-run or --move")
+            return
+            
+        moved = move_folders(
+            is_subset,
+            charts_root=args.charts_root,
+            dry_run=args.dry_run
+        )
+        
+        backup_root = Path(args.charts_root).parent / f"{Path(args.charts_root).name}_bac"
+        print(f"\nBackup location: {backup_root}")
+        
+        print("\nOperations:")
+        for src, dest in moved:
+            status = "Would move" if args.dry_run else "Moved"
+            print(f"{status}: {src} -> {dest}")
 
     conn.close()
+
+if __name__ == "__main__":
+    main()
