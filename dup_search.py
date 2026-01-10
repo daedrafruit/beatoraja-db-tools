@@ -4,38 +4,62 @@ from pathlib import Path
 from collections import defaultdict
 import argparse
 
-def create_folder_to_files_dictionary(database):
-    """Map each directory to its file hashes."""
+def build_hashes_by_folder(database):
+    """Return a mapping of folder path → list of chart SHA256 hashes."""
     database.execute("SELECT sha256, path FROM song")
-    dictionary = defaultdict(list)
-    for sha256, path in database.fetchall():
-        parent = str(Path(path).parent)
-        dictionary[parent].append(sha256)
-    return dictionary
+
+    hashes_by_folder = defaultdict(list)
+
+    for sha256, file_path in database.fetchall():
+        folder_path = str(Path(file_path).parent)
+        hashes_by_folder[folder_path].append(sha256)
+
+    return hashes_by_folder
+
 
 def find_subset_statuses(folder_dict):
     """Determine if folders are subsets of others."""
-    folders = list(folder_dict.keys())
-    folder_sets = {f: set(hashes) for f, hashes in folder_dict.items()}
-    is_subset = {f: False for f in folders}
+    folder_sets = {
+        folder: set(hashes)
+        for folder, hashes in folder_dict.items()
+    }
 
-    for i, folder1 in enumerate(folders):
-        set1 = folder_sets[folder1]
-        for folder2 in folders[i+1:]:
-            set2 = folder_sets[folder2]
-            if set1 <= set2:
-                is_subset[folder1] = True
-                break
-            elif set2 <= set1:
-                is_subset[folder2] = True
+    folder_sizes = {f: len(s) for f, s in folder_sets.items()}
+    subset_status_by_folder = {f: False for f in folder_sets}
 
-    return is_subset
+    hash_to_folders = defaultdict(set)
+    for folder, hashes in folder_sets.items():
+        for h in hashes:
+            hash_to_folders[h].add(folder)
 
-def find_maximal_folders(is_subset):
+    overlap_counts = defaultdict(lambda: defaultdict(int))
+
+    for folders in hash_to_folders.values():
+        folders = list(folders)
+        for f1 in folders:
+            for f2 in folders:
+                if f1 != f2:
+                    overlap_counts[f1][f2] += 1
+
+    for f1, overlaps in overlap_counts.items():
+        size1 = folder_sizes[f1]
+        if size1 == 0:
+            continue
+        for f2, shared in overlaps.items():
+            if shared == size1:
+                if folder_sizes[f2] > size1 or (folder_sizes[f2] == size1 and f2 < f1):
+                    subset_status_by_folder[f1] = True
+                    break
+
+    return subset_status_by_folder
+
+
+def find_maximal_folders(subset_status_by_folder):
     """Return folder names that are not subsets of any other folder."""
-    return [Path(f).name for f, subset in is_subset.items() if not subset]
+    return [Path(f).name for f, subset in subset_status_by_folder.items() if not subset]
 
-def print_samples(cursor, is_subset, num_samples):
+
+def print_samples(cursor, subset_status_by_folder, num_samples):
     """Print sample hashes with their folder subset statuses."""
     cursor.execute("SELECT DISTINCT sha256 FROM song ORDER BY RANDOM() LIMIT ?", (num_samples,))
     sampled_hashes = cursor.fetchall()
@@ -50,16 +74,16 @@ def print_samples(cursor, is_subset, num_samples):
         for path in paths:
             parent = str(Path(path).parent)
             folder_name = Path(parent).name
-            status = "Max" if not is_subset.get(parent, False) else "Sub"
+            status = "Max" if not subset_status_by_folder.get(parent, False) else "Sub"
             print(f"{status:>5} -> {parent}")
 
-def remove_subset_entries(cursor, is_subset):
+
+def remove_subset_entries(cursor, subset_status_by_folder):
     """Remove all entries in subset folders from the database."""
     subset_folders = []
-    for folder, is_sub in is_subset.items():
-        if is_sub:
-            folder_tuple = (folder,)
-            subset_folders.append(folder_tuple)
+    for folder, is_subset in subset_status_by_folder.items():
+        if is_subset:
+            subset_folders.append((folder,))
 
     if not subset_folders:
         return 0
@@ -78,13 +102,14 @@ def remove_subset_entries(cursor, is_subset):
     cursor.execute("DROP TABLE subset_folders")
     return removed_count
 
-def move_folders(is_subset, charts_root, dry_run=True):
+
+def move_folders_to_bac(subset_status_by_folder, charts_root, dry_run=True):
     """Move subset folders to backup location (_bac appended to charts root)"""
     moved = []
     charts_root = Path(charts_root).resolve()
     backup_root = charts_root.parent / f"{charts_root.name}_bac"
     
-    subset_folders = [folder for folder, is_sub in is_subset.items() if is_sub]
+    subset_folders = [folder for folder, is_sub in subset_status_by_folder.items() if is_sub]
     
     for folder in subset_folders:
         src = Path(folder).resolve()
@@ -105,6 +130,7 @@ def move_folders(is_subset, charts_root, dry_run=True):
     
     return moved
 
+
 def main():
     parser = argparse.ArgumentParser(description="Analyze and manage duplicate folders in a beatoraja database.")
     parser.add_argument("--db", required=True, help="Path to song.db")
@@ -117,31 +143,31 @@ def main():
     conn = sqlite3.connect(args.db)
     cursor = conn.cursor()
 
-    folder_dict = create_folder_to_files_dictionary(cursor)
-    is_subset = find_subset_statuses(folder_dict)
-    max_folders = find_maximal_folders(is_subset)
+    folder_dict = build_hashes_by_folder(cursor)
+    subset_status_by_folder = find_subset_statuses(folder_dict)
+    max_folders = find_maximal_folders(subset_status_by_folder)
 
-    print("Maximal folders:")
-    for folder in sorted(max_folders):
-        print(folder)
+    #print("Maximal folders:")
+    #for folder in sorted(max_folders):
+    #    print(folder)
     print(f"\nTotal maximal folders: {len(max_folders)}")
-    print(f"\nTotal subset folders: {len([folder for folder, is_sub in is_subset.items() if is_sub])}")
+    print(f"\nTotal subset folders: {len([folder for folder, is_sub in subset_status_by_folder.items() if is_sub])}")
 
     if args.remove:
-        removed_count = remove_subset_entries(cursor, is_subset)
+        removed_count = remove_subset_entries(cursor, subset_status_by_folder)
         conn.commit()
         print(f"\nRemoved {removed_count} entries from database.")
 
     if args.samples > 0:
-        print_samples(cursor, is_subset, args.samples)
+        print_samples(cursor, subset_status_by_folder, args.samples)
 
     if args.dry_run or args.charts_root:
         if not args.charts_root:
-            print("Error: --charts-root required when using --dry-run or --move")
+            print("Error: --charts-root required when using --dry-run")
             return
             
-        moved = move_folders(
-            is_subset,
+        moved = move_folders_to_bac(
+            subset_status_by_folder,
             charts_root=args.charts_root,
             dry_run=args.dry_run
         )
@@ -155,6 +181,7 @@ def main():
             print(f"{status}: {src} -> {dest}")
 
     conn.close()
+
 
 if __name__ == "__main__":
     main()
