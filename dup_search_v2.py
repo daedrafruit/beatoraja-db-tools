@@ -17,11 +17,14 @@ for each hash, if there are multiple folders
     merge folders (rsync --ignore-existing)
 """
 
-def build_hashes_by_folder(database):
-    """Return a mapping of folder path → list of chart SHA256 hashes."""
+def many_folders_by_hash_builder(database):
+    """
+    Return a mapping of hash → folders,
+    but only hashes that are owned by multiple folders
+    """
     database.execute("SELECT sha256, path FROM song")
 
-    hashes_by_folder = defaultdict(list)
+    folders_by_hash = defaultdict(list)
 
     rows = database.fetchall()
     for row in rows:
@@ -30,30 +33,50 @@ def build_hashes_by_folder(database):
 
         folder_path = str(Path(file_path).parent)
 
-        if folder_path not in hashes_by_folder[sha256]:
-            hashes_by_folder[sha256].append(folder_path)
+        if folder_path not in folders_by_hash[sha256]:
+            folders_by_hash[sha256].append(folder_path)
 
-    duplicates = {}
+    many_folders_by_hash = {}
 
-    for sha256 in hashes_by_folder:
-        folders = hashes_by_folder[sha256]
+    for sha256 in folders_by_hash:
+        folders = folders_by_hash[sha256]
 
         if len(folders) > 1:
-            duplicates[sha256] = folders
+            many_folders_by_hash[sha256] = folders
 
-    return duplicates
+    return many_folders_by_hash
+
 
 def merge_folders_to_dest(folders, dest):
     """merge multiple folders into a destination folder using rsync"""
     dest_path = Path(dest)
+    bof = Path('/home/daedr/ma-crib/games/bms/charts/BOF2004')
+    print(bof)
     for folder in folders:
-        path = Path(folder)
 
+        path = Path(folder)
+        print(path, end='')
+
+        if bof in path.parents: 
+            print(' is in bof')
+        else: 
+            print (' is NOT in bof')
+
+        """
         subprocess.run([
             'rsync', '--ignore-existing', '-a',
             str(path) + '/',
             str(dest_path) + '/'
         ])
+        """
+
+def run_deduplication(folders_by_hash, folder_priorities):
+    print(folder_priorities)
+    for hash in folders_by_hash:
+        print(hash)
+        for folder in folders_by_hash[hash]:
+            print(folder)
+
 
 def main():
     parser = argparse.ArgumentParser(description="Analyze and manage duplicate folders in a beatoraja database.")
@@ -62,15 +85,20 @@ def main():
     parser.add_argument("--remove", action="store_true", help="Remove redundant entries from the database, not from disk")
     parser.add_argument("--dry-run", action="store_true", help="Simulate folder moves")
     parser.add_argument("--charts-root", help="Root directory of your charts (required for moving)")
+    parser.add_argument("--root-priority", nargs='+', help="Priority of folders to merge to, descending")
     args = parser.parse_args()
+
+    abs_root_priorities = []
+    for root in args.root_priority:
+        abs_root_priorities.append(Path(root).absolute())
 
     conn = sqlite3.connect(args.db)
     cursor = conn.cursor()
+    folder_dict = many_folders_by_hash_builder(cursor)
 
-    #folder_dict = build_hashes_by_folder(cursor)
+    run_deduplication(folder_dict, abs_root_priorities)
     #print(json.dumps(folder_dict, sort_keys=True, indent=4, ensure_ascii=False))
-    merge_folders({'/home/daedr/ma-crib/games/bms/beatoraja/dup_search/test-charts/test-1/', '/home/daedr/ma-crib/games/bms/beatoraja/dup_search/test-charts/test-0/'}, './merge_test')
-    merge_folders('', './merge_test')
+    #merge_folders_to_dest({'/home/daedr/ma-crib/games/bms/charts/BOF2004/yorugao/', '/home/daedr/ma-crib/games/bms/charts/BMS_Starter_Pack_2022/2020/[Notorious(Nota & TRIAL)]GIFT/'}, './merge_test')
 
     conn.close()
 
