@@ -71,11 +71,12 @@ def merge_folders_to_dest(folders, dest):
         """
 
 def run_deduplication(folders_by_hash, folder_priorities):
-    print(folder_priorities)
     for hash in folders_by_hash:
-        print(hash)
         for folder in folders_by_hash[hash]:
-            print(folder)
+            path = Path(folder)
+            if Path(folder_priorities[0]) in path.parents:
+                print(" " + str(path) + " in " + str(Path(folder_priorities[0])))
+                
 
 
 def main():
@@ -97,7 +98,7 @@ def main():
     folder_dict = many_folders_by_hash_builder(cursor)
 
     run_deduplication(folder_dict, abs_root_priorities)
-    #print(json.dumps(folder_dict, sort_keys=True, indent=4, ensure_ascii=False))
+    #print(json.dumps(folder_dict,sort_keys=True, indent=4, ensure_ascii=False))
     #merge_folders_to_dest({'/home/daedr/ma-crib/games/bms/charts/BOF2004/yorugao/', '/home/daedr/ma-crib/games/bms/charts/BMS_Starter_Pack_2022/2020/[Notorious(Nota & TRIAL)]GIFT/'}, './merge_test')
 
     conn.close()
