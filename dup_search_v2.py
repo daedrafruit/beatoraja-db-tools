@@ -8,16 +8,6 @@ import subprocess
 import os
 
 
-"""
-map folders by hash
-
-for each hash, if there are multiple folders
-    folder already been moved?
-        continue
-
-    merge folders (rsync --ignore-existing)
-"""
-
 def many_folders_by_hash_builder(database):
     """
     Return a mapping of hash → folders,
@@ -80,21 +70,53 @@ def find_merge_folder(folders, folder_priorities):
 
     return folders[0]
 
+
 def run_deduplication(folders_by_hash, folder_priorities):
+    """
+    for each hash (dict already ensures hash has dupes)
+        for each folder
+
+            find highest priority folder
+
+            folder already been moved?
+                continue
+
+            merge folders (rsync --ignore-existing)
+    """
+
+    already_merged = defaultdict(bool)
+
     for hash in folders_by_hash:
+
         folders = folders_by_hash[hash]
-        if len(folders) < 3: continue
-        print(hash)
         merge_path = find_merge_folder(folders_by_hash[hash], folder_priorities)
+        worked = True
+        if len(folders) < 3: continue
+
+        for folder in folders:
+            if not already_merged[folder] and folder is not merge_path: 
+                worked = False
+            elif folder is not merge_path:
+                print("Already merged (" + hash[:3] + "): " + str(folder))
+        if worked: continue
+
+
+        print("===========================")
+        print("\n" + hash)
         for folder in folders:
             print(str(folder))
         print("===")
+
+        
         for folder in folders:
+            if already_merged[folder]: continue
             if folder == merge_path: continue
+
+            already_merged[folder] = True
             print(str(folder))
-        print("->\n" + str(merge_path))
-        print()
-        print()
+
+        print("->\n" + str(merge_path) + "\n")
+
 
 def merge_folders(sources, destination):
     for source in sources:
