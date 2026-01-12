@@ -2,6 +2,7 @@ import sqlite3
 from pathlib import Path
 from collections import defaultdict
 import argparse
+import shutil
 import json
 import subprocess
 import os
@@ -34,7 +35,7 @@ def many_folders_by_hash_builder(database):
         folder_path = str(Path(file_path).parent)
 
         if folder_path not in folders_by_hash[sha256]:
-            folders_by_hash[sha256].append(folder_path)
+            folders_by_hash[sha256].append(Path(folder_path))
 
     many_folders_by_hash = {}
 
@@ -70,34 +71,34 @@ def merge_folders_to_dest(folders, dest):
         ])
         """
 
-def is_in_priority_path(folder, folder_priorities):
-    path = Path(folder)
-    for priority in folder_priorities:
-        prio_path = Path(priority)
-        if Path(prio_path) in path.parents:
-            return True
-    return False
-
 def find_merge_folder(folders, folder_priorities):
     for priority in folder_priorities:
         for folder in folders:
-            path = Path(folder)
             prio_path = Path(priority)
-            if Path(prio_path) in path.parents:
-                return path
+            if priority in folder.parents:
+                return folder
+
     return folders[0]
 
 def run_deduplication(folders_by_hash, folder_priorities):
     for hash in folders_by_hash:
-        print(hash)
         folders = folders_by_hash[hash]
+        if len(folders) < 3: continue
+        print(hash)
         merge_path = find_merge_folder(folders_by_hash[hash], folder_priorities)
-        print(folders)
-        print(merge_path)
+        for folder in folders:
+            print(str(folder))
+        print("===")
+        for folder in folders:
+            if folder == merge_path: continue
+            print(str(folder))
+        print("->\n" + str(merge_path))
         print()
         print()
 
-
+def merge_folders(sources, destination):
+    for source in sources:
+        dest = shutil.move(source, destination)
 
 def main():
     parser = argparse.ArgumentParser(description="Analyze and manage duplicate folders in a beatoraja database.")
@@ -115,11 +116,11 @@ def main():
 
     conn = sqlite3.connect(args.db)
     cursor = conn.cursor()
+
+
     folder_dict = many_folders_by_hash_builder(cursor)
 
     run_deduplication(folder_dict, abs_root_priorities)
-    #print(json.dumps(folder_dict,sort_keys=True, indent=4, ensure_ascii=False))
-    #merge_folders_to_dest({'/home/daedr/ma-crib/games/bms/charts/BOF2004/yorugao/', '/home/daedr/ma-crib/games/bms/charts/BMS_Starter_Pack_2022/2020/[Notorious(Nota & TRIAL)]GIFT/'}, './merge_test')
 
     conn.close()
 
