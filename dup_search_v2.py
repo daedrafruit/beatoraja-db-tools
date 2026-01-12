@@ -2,6 +2,8 @@ import sqlite3
 from pathlib import Path
 from collections import defaultdict
 import argparse
+import wave
+import soundfile as sf
 import shutil
 import json
 import subprocess
@@ -48,12 +50,20 @@ def find_merge_folder(folders, folder_priorities):
     return folders[0]
 
 
+def is_audio_corrupt(audio_file):
+    try:
+        sf.read(audio_file)
+    except:
+        return True
+    return False
+
+
 def merge_folder_to_dest(src, dest):
     """
-    for each folder in src
+    for each child in src
         exists in dest?
             is a dir?
-                recur(folder, dest/folder)
+                recur(child, dest/child)
             is an audio file?
                dest version fail to decode, src version decodes?
                     remove dest version
@@ -65,17 +75,29 @@ def merge_folder_to_dest(src, dest):
         Path("./tmp").rmdir
     """merge folder into a destination folder using rsync"""
     print("Merging: " + str(src))
-    test_dir = Path("./tmp" + str(dest))
-    print("     To: " + str(test_dir))
-    test_dir.mkdir(exist_ok=True, parents=True)
-    for child in src.iterdir():
-        print(child)
+    #dest = Path("./tmp" + str(dest))
+    print("     To: " + str(dest))
+    #dest.mkdir(exist_ok=True, parents=True)
 
+    for child in src.iterdir():
+        dest_child = dest/child.name
+        if dest_child.exists(): 
+            if child.is_dir():
+                merge_folder_to_dest(child, dest_child)
+            if any(x == ".ogg" or x == ".wav" for x in child.suffixes):
+                print(child, end='')
+                if is_audio_corrupt(child):
+                    print(" is corrupt")
+                else:
+                    print(" is NOT corrupt")
+
+    """
     subprocess.run([
         'rsync', '--ignore-existing', '-a',
         str(src) + '/',
         str(test_dir) + '/'
     ])
+    """
 
 def run_deduplication(folders_by_hash, folder_priorities):
     """
@@ -153,8 +175,8 @@ def main():
 
     #run_deduplication(folder_dict, abs_root_priorities)
     merge_folder_to_dest(
-                    Path("/home/daedr/ma-crib/games/bms/charts/Assorted Packs/EventPackage/event/Hyper Remix 2/airen_druggy_HQ"),
-                    Path("/home/daedr/ma-crib/games/bms/charts/Assorted Packs/Insane BMS (2025-01-18)/[-45 Remixed by t+pazolite] 藍煉の人形 -druggy's remix-")
+                    Path("/home/daedr/ma-crib/games/bms/Illegal BMS/beatmania IIDX 15 DJ TROOPERS/15214 symptom/"),
+                    Path("/home/daedr/ma-crib/games/bms/Illegal BMS/beatmania IIDX 15 DJ TROOPERS/15214 symptom/")
                     )
 
     conn.close()
