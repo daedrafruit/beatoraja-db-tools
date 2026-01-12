@@ -38,29 +38,6 @@ def many_folders_by_hash_builder(database):
     return many_folders_by_hash
 
 
-def merge_folders_to_dest(folders, dest):
-    """merge multiple folders into a destination folder using rsync"""
-    dest_path = Path(dest)
-    bof = Path('/home/daedr/ma-crib/games/bms/charts/BOF2004')
-    print(bof)
-    for folder in folders:
-
-        path = Path(folder)
-        print(path, end='')
-
-        if bof in path.parents: 
-            print(' is in bof')
-        else: 
-            print (' is NOT in bof')
-
-        """
-        subprocess.run([
-            'rsync', '--ignore-existing', '-a',
-            str(path) + '/',
-            str(dest_path) + '/'
-        ])
-        """
-
 def find_merge_folder(folders, folder_priorities):
     for priority in folder_priorities:
         for folder in folders:
@@ -70,6 +47,35 @@ def find_merge_folder(folders, folder_priorities):
 
     return folders[0]
 
+
+def merge_folder_to_dest(src, dest):
+    """
+    for each folder in src
+        exists in dest?
+            is a dir?
+                recur(folder, dest/folder)
+            is an audio file?
+               dest version fail to decode, src version decodes?
+                    remove dest version
+                    move src version to dest
+            remove
+        move to dest (recursively for dirs)
+    """
+    if Path("./tmp").exists:
+        Path("./tmp").rmdir
+    """merge folder into a destination folder using rsync"""
+    print("Merging: " + str(src))
+    test_dir = Path("./tmp" + str(dest))
+    print("     To: " + str(test_dir))
+    test_dir.mkdir(exist_ok=True, parents=True)
+    for child in src.iterdir():
+        print(child)
+
+    subprocess.run([
+        'rsync', '--ignore-existing', '-a',
+        str(src) + '/',
+        str(test_dir) + '/'
+    ])
 
 def run_deduplication(folders_by_hash, folder_priorities):
     """
@@ -109,18 +115,21 @@ def run_deduplication(folders_by_hash, folder_priorities):
 
         
         for folder in folders:
+
             if already_merged[folder]: continue
             if folder == merge_path: continue
 
-            already_merged[folder] = True
-            print(str(folder))
+            """
+            if merge_folder_to_dest(
+                    "/home/daedr/ma-crib/games/bms/charts/Assorted Packs/EventPackage/event/Hyper Remix 2/airen_druggy_HQ",
+                    "/home/daedr/ma-crib/games/bms/charts/Assorted Packs/Insane BMS (2025-01-18)/[-45 Remixed by t+pazolite] 藍煉の人形 -druggy's remix-"
+                    ):
+                already_merged[folder] = True
+            """
+
 
         print("->\n" + str(merge_path) + "\n")
 
-
-def merge_folders(sources, destination):
-    for source in sources:
-        dest = shutil.move(source, destination)
 
 def main():
     parser = argparse.ArgumentParser(description="Analyze and manage duplicate folders in a beatoraja database.")
@@ -142,7 +151,11 @@ def main():
 
     folder_dict = many_folders_by_hash_builder(cursor)
 
-    run_deduplication(folder_dict, abs_root_priorities)
+    #run_deduplication(folder_dict, abs_root_priorities)
+    merge_folder_to_dest(
+                    Path("/home/daedr/ma-crib/games/bms/charts/Assorted Packs/EventPackage/event/Hyper Remix 2/airen_druggy_HQ"),
+                    Path("/home/daedr/ma-crib/games/bms/charts/Assorted Packs/Insane BMS (2025-01-18)/[-45 Remixed by t+pazolite] 藍煉の人形 -druggy's remix-")
+                    )
 
     conn.close()
 
