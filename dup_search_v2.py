@@ -70,13 +70,33 @@ def merge_folders_to_dest(folders, dest):
         ])
         """
 
+def is_in_priority_path(folder, folder_priorities):
+    path = Path(folder)
+    for priority in folder_priorities:
+        prio_path = Path(priority)
+        if Path(prio_path) in path.parents:
+            return True
+    return False
+
+def find_merge_folder(folders, folder_priorities):
+    for priority in folder_priorities:
+        for folder in folders:
+            path = Path(folder)
+            prio_path = Path(priority)
+            if Path(prio_path) in path.parents:
+                return path
+    return folders[0]
+
 def run_deduplication(folders_by_hash, folder_priorities):
     for hash in folders_by_hash:
-        for folder in folders_by_hash[hash]:
-            path = Path(folder)
-            if Path(folder_priorities[0]) in path.parents:
-                print(" " + str(path) + " in " + str(Path(folder_priorities[0])))
-                
+        print(hash)
+        folders = folders_by_hash[hash]
+        merge_path = find_merge_folder(folders_by_hash[hash], folder_priorities)
+        print(folders)
+        print(merge_path)
+        print()
+        print()
+
 
 
 def main():
