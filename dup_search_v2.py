@@ -31,6 +31,7 @@ def many_folders_by_hash_builder(cursor):
 
     return many_folders_by_hash
 
+
 def is_audio_corrupt(audio_file):
     if not audio_file.exists():
         return True
@@ -47,7 +48,7 @@ def merge_folder_to_dest(src, dest):
     print("     To: " + str(dest))
 
     for src_child in src.iterdir():
-
+        trash_dir = Path("./trash" + str(src))
         dest_child = dest/src_child.name
         src_is_audio_file = src_child.suffix.lower() in {".ogg", ".wav"}
         dest_not_corrupt = not is_audio_corrupt(dest_child)
@@ -68,7 +69,8 @@ def merge_folder_to_dest(src, dest):
         if src_is_audio_file:
 
             if dest_not_corrupt:
-                os.remove(src_child)
+                trash_dir.mkdir(parents=True, exist_ok=True)
+                shutil.move(src_child, trash_dir)
                 continue
 
             if src_not_corrupt:
@@ -76,16 +78,19 @@ def merge_folder_to_dest(src, dest):
                 continue
 
         # at this point it exists in dest, and is corrupt on both ends, or is just some random file
-        os.remove(src_child)
+        trash_dir = Path("./trash" + str(src))
+        trash_dir.mkdir(parents=True, exist_ok=True)
+        shutil.move(src_child, trash_dir)
 
 
 def find_merge_folder(folders, folder_priorities):
     for priority in folder_priorities:
         for folder in folders:
-            if priority in folder.parents or folder == priority:
+            if folder == priority or priority in folder.parents:
                 return folder
 
     return folders[0]
+
 
 def run_deduplication(folders_by_hash, folder_priorities, dry_run):
     already_merged = defaultdict(bool)
