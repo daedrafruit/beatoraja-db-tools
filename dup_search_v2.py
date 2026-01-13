@@ -5,6 +5,7 @@ import argparse
 import soundfile as sf
 import shutil
 import os
+import json
 
 def many_folders_by_hash_builder(cursor):
     """
@@ -19,7 +20,7 @@ def many_folders_by_hash_builder(cursor):
         folder_path = str(Path(file_path).parent)
 
         if folder_path not in folders_by_hash[sha256]:
-            folders_by_hash[sha256].append(Path(folder_path))
+            folders_by_hash[sha256].append(folder_path)
 
     many_folders_by_hash = {}
 
@@ -138,6 +139,7 @@ def main():
 
 
     folders_by_hash = many_folders_by_hash_builder(cursor)
+    print(json.dumps(folders_by_hash, indent=4))
 
     run_deduplication(folders_by_hash, abs_root_priorities, dry_run)
 

@@ -1,0 +1,22 @@
+{
+	"priority_list": [
+	  "Priority_1",
+	  "Priority_2",
+	  "Priority_3"
+	],
+	"files_by_hash": {
+		"hash_1": [
+				"Priority_1/file_a",
+				"Priority_1/file_b"
+		],
+		"hash_2": [
+				"Priority_1/file_a",
+				"Priority_1/file_c"
+		],
+		"hash_3": [
+				"Priority_1/file_c",
+				"Priority_1/file_d"
+		]
+	}
+}
+
