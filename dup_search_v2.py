@@ -4,8 +4,10 @@ from collections import defaultdict
 import argparse
 import soundfile as sf
 import shutil
-import os
-import json
+import logging
+import datetime
+
+logger  = logging.getLogger("")
 
 def many_folders_by_hash_builder(cursor):
     """
@@ -20,7 +22,7 @@ def many_folders_by_hash_builder(cursor):
         folder_path = str(Path(file_path).parent)
 
         if folder_path not in folders_by_hash[sha256]:
-            folders_by_hash[sha256].append(folder_path)
+            folders_by_hash[sha256].append(Path(folder_path))
 
     many_folders_by_hash = {}
 
@@ -42,53 +44,65 @@ def is_audio_corrupt(audio_file):
         return True
     return False
 
+def move_to_trash(src_child, src_root):
+    rel = src_child.relative_to(src_root)
+    trash_path = Path("./trash" + str(src_root)) / rel.parent
+    trash_path.mkdir(parents=True, exist_ok=True)
+    shutil.move(src_child, trash_path / src_child.name)
+
 
 def merge_folder_to_dest(src, dest):
-    """merge folder into a destination folder while considering integrity of audio files"""
-    print("Merging: " + str(src))
-    print("     To: " + str(dest))
+    """Merge folder into destination while preserving non-corrupt audio files."""
+    logger.info(f"Merging: {src}")
+    logger.info(f"     To: {dest}")
 
     for src_child in src.iterdir():
-        trash_dir = Path("./trash" + str(src))
-        dest_child = dest/src_child.name
-        src_is_audio_file = src_child.suffix.lower() in {".ogg", ".wav"}
-        dest_not_corrupt = not is_audio_corrupt(dest_child)
-        src_not_corrupt = not is_audio_corrupt(src_child)
+        dest_child = dest / src_child.name
+        is_audio = src_child.suffix.lower() in {".ogg", ".wav"}
 
-        if not dest_child.exists(): 
+        if not dest_child.exists():
+            logger.info("Moving [" + str(src_child.name) + "] (does not exists at dest)")
             shutil.move(src_child, dest)
             continue
 
         if src_child.is_dir():
             if dest_child.is_dir():
+                logger.info("Merging [" + str(src_child.name) + "] (is directory)")
                 merge_folder_to_dest(src_child, dest_child)
                 continue
             else:
+                logger.info("Moving [" + str(src_child.name) + "] (src is directory, dest is file)")
                 shutil.move(src_child, dest)
                 continue
 
-        if src_is_audio_file:
+        if is_audio:
+            src_ok = not is_audio_corrupt(src_child)
+            dest_ok = not is_audio_corrupt(dest_child)
 
-            if dest_not_corrupt:
-                trash_dir.mkdir(parents=True, exist_ok=True)
-                shutil.move(src_child, trash_dir)
-                continue
-
-            if src_not_corrupt:
+            if src_ok and not dest_ok:
+                logger.info("Trashing [" + str(dest_child.name) + "] (corrupt at dest)")
+                move_to_trash(dest_child, src)
                 shutil.move(src_child, dest)
                 continue
 
-        # at this point it exists in dest, and is corrupt on both ends, or is just some random file
-        trash_dir = Path("./trash" + str(src))
-        trash_dir.mkdir(parents=True, exist_ok=True)
-        shutil.move(src_child, trash_dir)
+            if dest_ok:
+                logger.info("Trashing [" + str(src_child.name) + "] (already exists)")
+                move_to_trash(src_child, src)
+                continue
+
+        logger.info("Trashing [" + str(src_child.name) + "] (already exists)")
+
+        move_to_trash(src_child, src)
 
 
 def find_merge_folder(folders, folder_priorities):
     for priority in folder_priorities:
         for folder in folders:
             if folder == priority or priority in folder.parents:
+                logger.info(" -> " + str(folder))
                 return folder
+            else:
+                logger.info("    " + str(folder))
 
     return folders[0]
 
@@ -97,7 +111,7 @@ def run_deduplication(folders_by_hash, folder_priorities, dry_run):
     already_merged = defaultdict(bool)
 
     for hash in folders_by_hash:
-
+        logger.info("Working: " + hash)
         folders = folders_by_hash[hash]
         merge_path = find_merge_folder(folders_by_hash[hash], folder_priorities)
         worked = True
@@ -105,22 +119,29 @@ def run_deduplication(folders_by_hash, folder_priorities, dry_run):
         for folder in folders:
             if not already_merged[folder] and folder is not merge_path: 
                 worked = False
-        if worked: continue
+        if worked: 
+            continue
 
         for folder in folders:
 
-            if already_merged[folder]: continue
+            if already_merged[folder]: 
+                logger.info("skipping: " + str(folder))
+                continue
             if folder == merge_path: continue
 
             if not dry_run: 
                 merge_folder_to_dest(folder, merge_path)
             else:
-                print("Merging: " + str(folder))
-                print("     to: " + str(merge_path) + "\n")
+                logger.info("Merging: " + str(folder))
+                logger.info("     to: " + str(merge_path) + "\n")
             already_merged[folder] = True
 
 
 def main():
+    logging.basicConfig(filename="dup_search.log", level=logging.INFO)
+    start = datetime.datetime.now()
+    logger.info(str(start) + "\nStarting...")
+
     parser = argparse.ArgumentParser(description="Analyze and manage duplicate folders in a beatoraja database.")
     parser.add_argument("--db", required=True, help="Path to song.db")
     parser.add_argument("--dry-run", action="store_true", help="Simulate folder moves")
@@ -137,13 +158,14 @@ def main():
     conn = sqlite3.connect(args.db)
     cursor = conn.cursor()
 
-
     folders_by_hash = many_folders_by_hash_builder(cursor)
-    print(json.dumps(folders_by_hash, indent=4))
+    #print(json.dumps(folders_by_hash, indent=4))
 
     run_deduplication(folders_by_hash, abs_root_priorities, dry_run)
 
     conn.close()
+    end = datetime.datetime.now()
+    logger.info(str(end) + "\nCompleted in " + str(end - start))
 
 
 if __name__ == "__main__":
