@@ -66,6 +66,7 @@ def merge_folder_to_dest(src, dest):
                 merge_folder_to_dest(src_child, dest_child)
                 continue
             else:
+                move_to_trash(dest_child, src)
                 shutil.move(src_child, dest)
                 continue
 
