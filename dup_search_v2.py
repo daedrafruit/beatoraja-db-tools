@@ -5,6 +5,7 @@ import argparse
 import soundfile as sf
 import shutil
 import datetime
+import hashlib
 
 def many_folders_by_hash_builder(cursor):
     """
@@ -95,6 +96,19 @@ def find_merge_folder(folders, folder_priorities):
     return folders[0]
 
 
+def remove_folder_from_hashes(folder):
+    sha256 = hashlib.sha256()
+    for file in folder.iterdir():
+        if file.suffix in {".bms", ".pms", ".bme", ".bml"}:
+            print(file)
+            f = open(file, 'rb')
+            while True:
+                data = f.read(65536)
+                if not data:
+                    break
+                sha256.update(data)
+            print(sha256.hexdigest())
+
 def run_deduplication(folders_by_hash, folder_priorities, dry_run):
     already_merged = defaultdict(bool)
 
@@ -118,6 +132,7 @@ def run_deduplication(folders_by_hash, folder_priorities, dry_run):
             if folder == merge_path: continue
 
             if not dry_run: 
+                remove_folder_from_hashes(folder)
                 merge_folder_to_dest(folder, merge_path)
             else:
                 print("Merging: " + str(folder))
