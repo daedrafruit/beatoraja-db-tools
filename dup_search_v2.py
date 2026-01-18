@@ -5,7 +5,6 @@ import argparse
 import soundfile as sf
 import shutil
 import datetime
-import hashlib
 
 def many_folders_by_hash_builder(cursor):
     """
@@ -32,29 +31,34 @@ def many_folders_by_hash_builder(cursor):
 
     return many_folders_by_hash
 
-
 def is_audio_corrupt(audio_file):
     if not audio_file.exists():
         return True
     try:
-        sf.read(audio_file)
+        sf.info(audio_file)
     except Exception:
         return True
     return False
 
-def move_to_trash(src_child, src_root):
-    rel = src_child.relative_to(src_root)
-    trash_path = Path("./trash" + str(src_root)) / rel.parent
-    trash_path.mkdir(parents=True, exist_ok=True)
-    shutil.move(src_child, trash_path / src_child.name)
+def move_to_trash(src):
+    if not src.exists():
+        return
+
+    src = src.resolve()
+    relative_path = src.relative_to(src.anchor)
+    trash_dest = Path("./trash") / relative_path
+
+    trash_dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(src, trash_dest)
 
 
 def merge_folder_to_dest(src, dest):
     """Merge folder into destination while preserving non-corrupt audio files."""
-    print(f"Merging: {src}")
-    print(f"     To: {dest}")
 
-    for src_child in src.iterdir():
+    # snapshot children to avoid mutating the directory while iterating
+    children = list(src.iterdir())
+
+    for src_child in children:
         dest_child = dest / src_child.name
         is_audio = src_child.suffix.lower() in {".ogg", ".wav"}
 
@@ -67,7 +71,7 @@ def merge_folder_to_dest(src, dest):
                 merge_folder_to_dest(src_child, dest_child)
                 continue
             else:
-                move_to_trash(dest_child, src)
+                move_to_trash(dest_child)
                 shutil.move(src_child, dest)
                 continue
 
@@ -76,68 +80,62 @@ def merge_folder_to_dest(src, dest):
             dest_ok = not is_audio_corrupt(dest_child)
 
             if src_ok and not dest_ok:
-                move_to_trash(dest_child, src)
-                shutil.move(src_child, dest)
+                move_to_trash(dest_child)
+                shutil.move(src_child, dest_child)
                 continue
 
             if dest_ok:
-                move_to_trash(src_child, src)
+                move_to_trash(src_child)
                 continue
 
-        move_to_trash(src_child, src)
+        move_to_trash(src_child)
 
 
 def find_merge_folder(folders, folder_priorities):
     for priority in folder_priorities:
         for folder in folders:
+            if not folder.exists():
+                continue
             if folder == priority or priority in folder.parents:
                 return folder
 
-    return folders[0]
+    return sorted(folders)[0]
 
-
-def remove_folder_from_hashes(folder):
-    sha256 = hashlib.sha256()
-    for file in folder.iterdir():
-        if file.suffix in {".bms", ".pms", ".bme", ".bml"}:
-            print(file)
-            f = open(file, 'rb')
-            while True:
-                data = f.read(65536)
-                if not data:
-                    break
-                sha256.update(data)
-            print(sha256.hexdigest())
-
-def run_deduplication(folders_by_hash, folder_priorities, dry_run):
-    already_merged = defaultdict(bool)
-
+def run_deduplication(folders_by_hash, folder_priorities, canon):
+    already_merged = set()
     for hash in folders_by_hash:
         print("Working: " + hash)
         folders = folders_by_hash[hash]
         merge_path = find_merge_folder(folders_by_hash[hash], folder_priorities)
-        worked = True
+        did_merge = False
 
         for folder in folders:
-            if not already_merged[folder] and folder is not merge_path: 
-                worked = False
-        if worked: 
-            continue
-
-        for folder in folders:
-
-            if already_merged[folder]: 
-                print("Skippin: " + str(folder))
+            if not folder.exists():
                 continue
-            if folder == merge_path: continue
+            if folder in already_merged:
+                continue
 
-            if not dry_run: 
-                remove_folder_from_hashes(folder)
-                merge_folder_to_dest(folder, merge_path)
-            else:
-                print("Merging: " + str(folder))
-                print("     to: " + str(merge_path) + "\n")
-            already_merged[folder] = True
+            folder_is_canon = (
+                    folder in canon or 
+                    bool(len(set(folder.parents).intersection(canon)))
+                )
+
+            if folder_is_canon:
+                continue
+
+            if folder == merge_path:
+                continue
+            if merge_path in folder.parents:
+                continue
+            if folder in merge_path.parents:
+                continue
+
+            merge_folder_to_dest(folder, merge_path)
+            print("Merged: " + str(folder))
+            did_merge = True
+            already_merged.add(folder)
+
+        if did_merge: print("Target: " + str(merge_path))
 
 
 def main():
@@ -146,24 +144,26 @@ def main():
 
     parser = argparse.ArgumentParser(description="Analyze and manage duplicate folders in a beatoraja database.")
     parser.add_argument("--db", required=True, help="Path to song.db")
-    parser.add_argument("--dry-run", action="store_true", help="Simulate folder moves")
     parser.add_argument("--root-priority", nargs='+', help="Priority of folders to merge to, descending")
+    parser.add_argument("--canon", nargs='+', help="Paths to never delete from")
     args = parser.parse_args()
 
-    dry_run = args.dry_run
-
-    abs_root_priorities = []
+    root_priorities = []
     if args.root_priority:
         for root in args.root_priority:
-            abs_root_priorities.append(Path(root).absolute())
+            root_priorities.append(Path(root).absolute())
+
+    canon = []
+    if args.canon:
+        for root in args.canon:
+            canon.append(Path(root).absolute())
 
     conn = sqlite3.connect(args.db)
     cursor = conn.cursor()
 
     folders_by_hash = many_folders_by_hash_builder(cursor)
-    #print(json.dumps(folders_by_hash, indent=4))
 
-    run_deduplication(folders_by_hash, abs_root_priorities, dry_run)
+    run_deduplication(folders_by_hash, root_priorities, canon)
 
     conn.close()
     end = datetime.datetime.now()

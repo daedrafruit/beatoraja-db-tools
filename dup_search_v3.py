@@ -73,7 +73,6 @@ def find_priority_folder(folders, folder_priorities):
                     prio_index = i
                     break
 
-
         has_higher_priority = prio_index < best_prio_index
         is_larger_with_same_priority = prio_index == best_prio_index and size > best_size
         
@@ -101,8 +100,13 @@ def run_deduplication(folders_by_hash, folder_priorities, canon_folders):
     for sha256 in folders_by_hash:
 
         print("Working: " + sha256)
+        folder_sizes = {}
         folders = folders_by_hash[sha256]
-        priority = find_priority_folder(folders_by_hash[sha256], folder_priorities)
+        for folder in folders:
+            folder_sizes[folder] = sum(1 for p in folder.rglob("*") if p.is_file())
+        print(folder_sizes)
+            
+        priority = find_priority_folder(folders, folder_priorities)
         print(priority)
 
         for folder in folders:
