@@ -4,6 +4,6 @@ ffmpeg.exe
 merge_test/
 tmp/
 test-charts_bac
-log
-trash/
+log*
+trash*/
 

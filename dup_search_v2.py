@@ -1,4 +1,5 @@
 import sqlite3
+import sys
 from pathlib import Path
 from collections import defaultdict
 import argparse
@@ -49,7 +50,16 @@ def move_to_trash(src):
     trash_dest = Path("./trash") / relative_path
 
     trash_dest.parent.mkdir(parents=True, exist_ok=True)
-    shutil.move(src, trash_dest)
+    safe_move(src, trash_dest)
+
+
+def safe_move(src, dst):
+    try:
+        shutil.move(src, dst)
+        return True
+    except PermissionError:
+        print(f"SKIP (no write permission): {dst.parent}")
+        return False
 
 
 def merge_folder_to_dest(src, dest):
@@ -63,7 +73,7 @@ def merge_folder_to_dest(src, dest):
         is_audio = src_child.suffix.lower() in {".ogg", ".wav"}
 
         if not dest_child.exists():
-            shutil.move(src_child, dest)
+            safe_move(src_child, dest)
             continue
 
         if src_child.is_dir():
@@ -72,7 +82,7 @@ def merge_folder_to_dest(src, dest):
                 continue
             else:
                 move_to_trash(dest_child)
-                shutil.move(src_child, dest)
+                safe_move(src_child, dest)
                 continue
 
         if is_audio:
@@ -81,7 +91,7 @@ def merge_folder_to_dest(src, dest):
 
             if src_ok and not dest_ok:
                 move_to_trash(dest_child)
-                shutil.move(src_child, dest_child)
+                safe_move(src_child, dest_child)
                 continue
 
             if dest_ok:
@@ -103,8 +113,9 @@ def find_merge_folder(folders, folder_priorities):
 
 def run_deduplication(folders_by_hash, folder_priorities, canon):
     already_merged = set()
-    for hash in folders_by_hash:
-        print("Working: " + hash)
+    total = len(folders_by_hash)
+    for count, hash in enumerate(folders_by_hash, start=1):
+        print(f"Working ({count}/{total}): {hash}")
         folders = folders_by_hash[hash]
         merge_path = find_merge_folder(folders_by_hash[hash], folder_priorities)
         did_merge = False
@@ -139,6 +150,14 @@ def run_deduplication(folders_by_hash, folder_priorities, canon):
 
 
 def main():
+
+    while True:
+        user_input = input("Have you rebuilt your beatoraja database? (y/N): ")
+        if user_input.lower() == 'y':
+            break
+        else:
+            sys.exit()
+        
     start = datetime.datetime.now()
     print(str(start) + "\nStarting...")
 
