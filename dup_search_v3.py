@@ -1,8 +1,14 @@
 import sqlite3
+import os
+import datetime 
+import sys
 from pathlib import Path
 from collections import defaultdict
 import argparse
 import shutil
+
+import logging
+logger = logging.getLogger(__name__)
 
 def many_folders_by_hash_builder(cursor):
     """
@@ -29,104 +35,121 @@ def many_folders_by_hash_builder(cursor):
 
     return many_folders_by_hash
 
+_folder_empty_cache = {}
+def folder_empty(path):
+    path = path.resolve()
+
+    cached = _folder_empty_cache.get(path)
+    if cached is not None:
+        return cached
+
+    with os.scandir(path) as folder:
+        for _ in folder:
+            _folder_empty_cache[path] = False
+            return False
+
+    _folder_empty_cache[path] = True
+    return True
 
 def move_to_trash(src):
     if not src.exists():
         return
-    relative_path = src.relative_to("/")
 
+    src = src.resolve()
+    relative_path = src.relative_to(src.anchor)
     trash_dest = Path("./trash") / relative_path
-    trash_dest.parent.mkdir(parents=True, exist_ok=True)
 
-    shutil.move(str(src), str(trash_dest))
+    trash_dest.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        shutil.move(src, trash_dest)
+        return True
+    except PermissionError:
+        logger.info(f"SKIP (no write permission): {trash_dest.parent}")
+        return False
 
 
 def find_priority_folder(folders, folder_priorities):
-    """
-    the "priority" folder is the folder in a set that is:
-    - not-empty
-    - highest priority
-    - if two share priority level, the largest (file count) wins
-    """
-    best_folder = folders[0]
-    best_prio_index = float("inf")
-    best_size = -1
-
-    for folder in folders:
-        if not folder.exists():
-            continue
-
-        size = sum(1 for p in folder.rglob("*") if p.is_file())
-
-        if size == 0:
-            continue
-
-        prio_index = float("inf")
-        for i, priority in enumerate(folder_priorities):
+    for priority in folder_priorities:
+        for folder in folders:
             if not folder.exists():
                 continue
-            if folder.samefile(priority):
-                prio_index = i
-                break
-            for parent in folder.parents:
-                if priority.samefile(parent):
-                    prio_index = i
-                    break
+            if folder_empty(folder):
+                continue
+            if folder == priority or priority in folder.parents:
+                return folder
 
-        has_higher_priority = prio_index < best_prio_index
-        is_larger_with_same_priority = prio_index == best_prio_index and size > best_size
-        
-
-        if has_higher_priority or is_larger_with_same_priority:
-            best_folder = folder
-            best_prio_index = prio_index
-            best_size = size
-
-    return best_folder
+    return min(folders, key=lambda p: len(p.parts))
 
 
-def is_canon(folder: Path, canon_folders):
-    for canon in canon_folders:
-        if not folder.exists():
-            continue
-        if folder.samefile(canon):
-            return True
-        for parent in folder.parents:
-            if parent.samefile(canon):
-                return True
-    return False
+def run_deduplication(folders_by_hash, folder_priorities, canon_folders, dry_run):
+    already_removed = set()
+    total = len(folders_by_hash)
+    for count, sha256 in enumerate(folders_by_hash, start=1):
+        logger.info(f"Working: {sha256}")
+        print(f"\rWorking ({count}/{total})", end="", flush=True)
 
-def run_deduplication(folders_by_hash, folder_priorities, canon_folders):
-    for sha256 in folders_by_hash:
-
-        print("Working: " + sha256)
-        folder_sizes = {}
         folders = folders_by_hash[sha256]
-        for folder in folders:
-            folder_sizes[folder] = sum(1 for p in folder.rglob("*") if p.is_file())
-        print(folder_sizes)
-            
+
         priority = find_priority_folder(folders, folder_priorities)
-        print(priority)
+        logger.info(f"Priority: {priority}")
 
         for folder in folders:
             if not folder.exists():
                 continue
-            if folder.samefile(priority):
-                continue
-            if is_canon(folder, canon_folders):
+            if folder in already_removed:
                 continue
 
-            move_to_trash(folder)
-            print("Trashing: " + str(folder))
+            folder_is_canon = any(folder == c or c in folder.parents for c in canon_folders)
+
+            if folder_is_canon:
+                continue
+
+            if folder.samefile(priority):
+                continue
+            if folder in priority.parents:
+                continue
+
+            if not dry_run:
+                move_to_trash(folder)
+
+            logger.info(f"Trashing: {folder}")
+            already_removed.add(folder)
 
 
 def main():
+    Path("logs").mkdir(exist_ok=True)
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    log_file = f"logs/{timestamp}.log"
+    logging.basicConfig(
+        filename=log_file,
+        format='%(asctime)s %(levelname)-8s %(message)s',
+        level=logging.DEBUG,
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+
     parser = argparse.ArgumentParser(description="Analyze and manage duplicate folders in a beatoraja database.")
     parser.add_argument("--db", required=True, help="Path to song.db")
     parser.add_argument("--root-priority", nargs='+', help="Priority of folders to merge to, descending")
     parser.add_argument("--canon", nargs='+', help="Paths to never delete from")
+    parser.add_argument("--dry-run", action="store_true", help="Simulate deduplication, no filesystem writes")
+    parser.add_argument("--save-db", action="store_true", help="Save the db, useful for debugging")
+
     args = parser.parse_args()
+
+    while True:
+        user_input = input("Have you rebuilt your beatoraja database? (y/N): ")
+        if user_input.lower() == 'y':
+            break
+        else:
+            sys.exit()
+        
+    start = datetime.datetime.now()
+    logger.info("Starting...")
+
+    if args.save_db:
+        db_path = Path(args.db)
+        Path("saved_dbs").mkdir(exist_ok=True)
+        shutil.copyfile(db_path, Path(f"./saved_dbs/{timestamp}"))
 
     root_priorities = []
     if args.root_priority:
@@ -143,9 +166,12 @@ def main():
 
     folders_by_hash = many_folders_by_hash_builder(cursor)
 
-    run_deduplication(folders_by_hash, root_priorities, canon)
+    run_deduplication(folders_by_hash, root_priorities, canon, args.dry_run)
 
     conn.close()
+    end = datetime.datetime.now()
+    logger.info("Completed in " + str(end - start))
+
 
 if __name__ == "__main__":
     main()
