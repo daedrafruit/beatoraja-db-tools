@@ -141,29 +141,39 @@ def remove_subset_entries(cursor, subset_status_by_folder, dry_run=True):
 
 def move_folders_to_bac(subset_status_by_folder, charts_root, dry_run=True):
     """Move subset folders to backup location (_bac appended to charts root)"""
-    moved = []
     charts_root = Path(charts_root).resolve()
     backup_root = charts_root.parent / f"{charts_root.name}_bac"
     
     subset_folders = [folder for folder, is_sub in subset_status_by_folder.items() if is_sub]
-    
+    moved = []
+
     for folder in subset_folders:
         src = Path(folder).resolve()
+
         try:
             rel_path = src.relative_to(charts_root)
             dest = backup_root / rel_path
-            
+
+            print("\nMOVE")
+            print(f"  from: {src}")
+            print(f"  to:   {dest}")
+
             if dry_run:
+                print("  (dry run — not moved)")
                 moved.append((src, dest))
                 continue
-                
+
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.move(str(src), str(dest))
+            print("  moved successfully")
+
             moved.append((src, dest))
-            
+
         except ValueError:
             print(f"Skipping {src} - not under charts root {charts_root}")
-    
+
+    print(f"\nTotal folders {'to move' if dry_run else 'moved'}: {len(moved)}")
+
     return moved
 
 
