@@ -79,28 +79,66 @@ def print_samples(cursor, subset_status_by_folder, num_samples):
             print(f"{status:>5} -> {parent}")
 
 
-def remove_subset_entries(cursor, subset_status_by_folder):
-    """Remove all entries in subset folders from the database."""
+def remove_subset_entries(cursor, subset_status_by_folder, dry_run=True):
+    """Remove all entries in subset folders from the database, with output."""
+
     subset_folders = []
     for folder, is_subset in subset_status_by_folder.items():
         if is_subset:
-            subset_folders.append((folder,))
+            subset_folders.append(folder)
 
     if not subset_folders:
         return 0
 
-    cursor.execute("CREATE TEMP TABLE subset_folders (folder TEXT PRIMARY KEY)")
-    cursor.executemany("INSERT INTO subset_folders VALUES (?)", subset_folders)
+    cursor.connection.create_function(
+        "get_parent", 1, lambda p: str(Path(p).parent)
+    )
 
-    cursor.connection.create_function("get_parent", 1, lambda p: str(Path(p).parent))
+    cursor.execute("""
+        SELECT sha256, path
+        FROM song
+        WHERE get_parent(path) IN (%s)
+    """ % ",".join("?" * len(subset_folders)), subset_folders)
+
+    rows = cursor.fetchall()
+
+    for sha256, path in rows:
+        parent = str(Path(path).parent)
+
+        cursor.execute(
+            "SELECT path FROM song WHERE sha256=? AND path!=?",
+            (sha256, path),
+        )
+        others = [str(Path(p[0]).parent) for p in cursor.fetchall()]
+
+        print(f"DELETE {sha256}")
+        print(f"  from: {parent}")
+        if others:
+            print("  also in:")
+            for o in others:
+                print(f"    {o}")
+        else:
+            print("  no other copies found")
+
+    if dry_run:
+        print(f"\nWould delete {len(rows)} rows.")
+        return len(rows)
+
+    cursor.execute("CREATE TEMP TABLE subset_folders (folder TEXT PRIMARY KEY)")
+    cursor.executemany(
+        "INSERT INTO subset_folders VALUES (?)",
+        [(f,) for f in subset_folders],
+    )
 
     cursor.execute("""
         DELETE FROM song
         WHERE get_parent(path) IN (SELECT folder FROM subset_folders)
     """)
-    removed_count = cursor.rowcount
 
+    removed_count = cursor.rowcount
     cursor.execute("DROP TABLE subset_folders")
+
+    print(f"\nDeleted {removed_count} rows.")
     return removed_count
 
 
@@ -168,10 +206,17 @@ def main():
     print(f"\nTotal maximal folders: {len(max_folders)}")
     print(f"\nTotal subset folders: {len([folder for folder, is_sub in subset_status_by_folder.items() if is_sub])}")
 
-    if args.remove:
-        removed_count = remove_subset_entries(cursor, subset_status_by_folder)
+
+
+    if args.remove or args.dry_run:
+        removed_count = remove_subset_entries(
+            cursor,
+            subset_status_by_folder,
+            dry_run=args.dry_run
+        )
+
+    if args.remove and not args.dry_run:
         conn.commit()
-        print(f"\nRemoved {removed_count} entries from database.")
 
     if args.samples > 0:
         print_samples(cursor, subset_status_by_folder, args.samples)
