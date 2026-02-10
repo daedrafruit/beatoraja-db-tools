@@ -82,10 +82,7 @@ def print_samples(cursor, subset_status_by_folder, num_samples):
 def remove_subset_entries(cursor, subset_status_by_folder, dry_run=True):
     """Remove all entries in subset folders from the database, with output."""
 
-    subset_folders = []
-    for folder, is_subset in subset_status_by_folder.items():
-        if is_subset:
-            subset_folders.append(folder)
+    subset_folders = [f for f, is_subset in subset_status_by_folder.items() if is_subset]
 
     if not subset_folders:
         return 0
@@ -94,22 +91,22 @@ def remove_subset_entries(cursor, subset_status_by_folder, dry_run=True):
         "get_parent", 1, lambda p: str(Path(p).parent)
     )
 
-    cursor.execute("""
-        SELECT sha256, path
-        FROM song
-        WHERE get_parent(path) IN (%s)
-    """ % ",".join("?" * len(subset_folders)), subset_folders)
+    cursor.execute("SELECT sha256, path FROM song")
+    all_rows = cursor.fetchall()
 
-    rows = cursor.fetchall()
+    hash_to_folders = defaultdict(list)
+    for sha256, path in all_rows:
+        hash_to_folders[sha256].append(str(Path(path).parent))
+
+    rows = [
+        (sha256, path)
+        for sha256, path in all_rows
+        if str(Path(path).parent) in subset_folders
+    ]
 
     for sha256, path in rows:
         parent = str(Path(path).parent)
-
-        cursor.execute(
-            "SELECT path FROM song WHERE sha256=? AND path!=?",
-            (sha256, path),
-        )
-        others = [str(Path(p[0]).parent) for p in cursor.fetchall()]
+        others = [f for f in hash_to_folders[sha256] if f != parent]
 
         print(f"DELETE {sha256}")
         print(f"  from: {parent}")
