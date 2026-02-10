@@ -1,4 +1,6 @@
 import shutil
+import datetime
+import sys
 import sqlite3
 from pathlib import Path
 from collections import defaultdict
@@ -73,7 +75,6 @@ def print_samples(cursor, subset_status_by_folder, num_samples):
         print("Paths:")
         for path in paths:
             parent = str(Path(path).parent)
-            folder_name = Path(parent).name
             status = "Max" if not subset_status_by_folder.get(parent, False) else "Sub"
             print(f"{status:>5} -> {parent}")
 
@@ -138,7 +139,21 @@ def main():
     parser.add_argument("--remove", action="store_true", help="Remove redundant entries from the database, not from disk")
     parser.add_argument("--dry-run", action="store_true", help="Simulate folder moves")
     parser.add_argument("--charts-root", help="Root directory of your charts (required for moving)")
+    parser.add_argument("--save-db", action="store_true", help="Save the db, useful for debugging")
     args = parser.parse_args()
+
+    while True:
+        user_input = input("Have you rebuilt your beatoraja database? (y/N): ")
+        if user_input.lower() == 'y':
+            break
+        else:
+            sys.exit()
+
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    if args.save_db:
+        db_path = Path(args.db)
+        Path("saved_dbs").mkdir(exist_ok=True)
+        shutil.copyfile(db_path, Path(f"./saved_dbs/{timestamp}"))
 
     conn = sqlite3.connect(args.db)
     cursor = conn.cursor()
@@ -175,10 +190,13 @@ def main():
         backup_root = Path(args.charts_root).parent / f"{Path(args.charts_root).name}_bac"
         print(f"\nBackup location: {backup_root}")
         
+
+        """
         print("\nOperations:")
         for src, dest in moved:
             status = "Would move" if args.dry_run else "Moved"
             print(f"{status}: {src} -> {dest}")
+        """
 
     conn.close()
 
